@@ -73,6 +73,10 @@ class Schema(ma.Schema):
 
     def __init__(self, *args, **kwargs):
         self.include_data = kwargs.pop("include_data", ())
+
+        # This is to avoid infinite loops when we try to recursively deserialize
+        # relationships
+        self.include_lookup = kwargs.pop("include_lookup", {})
         super().__init__(*args, **kwargs)
         if self.include_data:
             self.check_relations(self.include_data)
@@ -154,6 +158,9 @@ class Schema(ma.Schema):
             raise IncorrectTypeError(actual=item["type"], expected=self.opts.type_)
 
         payload = self.dict_class()
+        # Even though payload isn't fully constructed yet, we save it to the lookup
+        # in case a child schema needs a reference to it
+        self.add_resource_to_lookup(item["type"], item["id"], payload)
         if "id" in item:
             payload["id"] = item["id"]
         if "meta" in item:
@@ -223,6 +230,25 @@ class Schema(ma.Schema):
             if not field_obj.data_key:
                 field_obj.data_key = self.inflect(field_name)
         return None
+
+    def add_resource_to_lookup(self, type, id, resource):
+        """
+        Store a deserialized resource, so we can break infinite loops
+        """
+        self.include_lookup[(type, id)] = resource
+
+    def get_resource_from_lookup(self, type, id):
+        """
+        Store a deserialized resource, so we can break infinite loops
+        """
+        return self.include_lookup.get((type, id), None)
+
+    @staticmethod
+    def get_resource_key(resource):
+        """
+        Get a hashable key that uniquely represents a resource
+        """
+        return resource["type"], resource["id"]
 
     def _do_load(self, data, many=None, **kwargs):
         """Override `marshmallow.Schema._do_load` for custom JSON API handling.

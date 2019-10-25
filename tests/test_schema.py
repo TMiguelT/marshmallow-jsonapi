@@ -851,3 +851,96 @@ class TestRelationshipLoading:
         assert data["author"] == "1"
         assert "comments" in data
         assert data["comments"] == ["2", "3"]
+
+    def test_circular_relationship(self):
+        class RootSchema(Schema):
+
+            id = fields.Str(required=True)
+            baz = fields.Str()
+
+            first_children = fields.Relationship(
+                many=True, type_="first_children", schema="FirstChildSchema"
+            )
+
+            class Meta:
+                type_ = "root"
+
+        class FirstChildSchema(Schema):
+
+            id = fields.Str(required=True)
+            foo = fields.Str()
+
+            second_children = fields.Relationship(
+                many=True, type_="second_children", schema="SecondChildSchema"
+            )
+
+            class Meta:
+                type_ = "first_children"
+
+        class SecondChildSchema(Schema):
+
+            id = fields.Str(required=True)
+            bar = fields.Str()
+
+            first_children = fields.Relationship(
+                many=True, type_="first_children", schema="FirstChildSchema"
+            )
+
+            class Meta:
+                type_ = "second_children"
+
+        data = {
+            "data": {
+                "type": "root",
+                "id": "root_id",
+                "attributes": {"baz": "qwerty"},
+                "relationships": {
+                    "first_children": {
+                        "data": [{"id": "firstchild_id", "type": "first_children"}]
+                    }
+                },
+            },
+            "included": [
+                {
+                    "id": "firstchild_id",
+                    "type": "first_children",
+                    "attributes": {"foo": "qwerty"},
+                    "relationships": {
+                        "second_children": {
+                            "data": [
+                                {"id": "secondchild_id", "type": "second_children"}
+                            ]
+                        }
+                    },
+                },
+                {
+                    "id": "secondchild_id",
+                    "type": "second_children",
+                    "attributes": {"bar": "qwerty"},
+                    "relationships": {
+                        "first_children": {
+                            "data": [{"id": "firstchild_id", "type": "first_children"}]
+                        }
+                    },
+                },
+            ],
+        }
+
+        schema = RootSchema()
+        loaded = unpack(schema.load(data))
+
+        assert loaded["baz"] == "qwerty"
+        assert loaded["first_children"][0]["foo"] == "qwerty"
+        assert loaded["first_children"][0]["second_children"][0]["bar"] == "qwerty"
+        assert (
+            loaded["first_children"][0]["second_children"][0]["first_children"][0][
+                "foo"
+            ]
+            == "qwerty"
+        )
+        assert (
+            loaded["first_children"][0]["second_children"][0]["first_children"][0][
+                "second_children"
+            ][0]["bar"]
+            == "qwerty"
+        )

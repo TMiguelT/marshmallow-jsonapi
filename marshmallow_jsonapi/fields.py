@@ -13,7 +13,6 @@ from marshmallow.utils import is_collection, missing as missing_
 
 from .utils import get_value, resolve_params, _MARSHMALLOW_VERSION_INFO
 
-
 _RECURSIVE_NESTED = "self"
 # JSON API disallows U+005F LOW LINE at the start of a member name, so we can
 #  use it to load the Meta type from since it can't clash with an attribute
@@ -127,7 +126,12 @@ class Relationship(BaseRelationship):
         if isinstance(self.__schema, SchemaABC):
             return self.__schema
         if isinstance(self.__schema, type) and issubclass(self.__schema, SchemaABC):
-            self.__schema = self.__schema(only=only, exclude=exclude, context=context)
+            self.__schema = self.__schema(
+                only=only,
+                exclude=exclude,
+                context=context,
+                include_lookup=self.parent.include_lookup,
+            )
             return self.__schema
         if isinstance(self.__schema, (str, bytes)):
             if self.__schema == _RECURSIVE_NESTED:
@@ -137,11 +141,15 @@ class Relationship(BaseRelationship):
                     exclude=exclude,
                     context=context,
                     include_data=self.parent.include_data,
+                    include_lookup=self.parent.include_lookup,
                 )
             else:
                 schema_class = class_registry.get_class(self.__schema)
                 self.__schema = schema_class(
-                    only=only, exclude=exclude, context=context
+                    only=only,
+                    exclude=exclude,
+                    context=context,
+                    include_lookup=self.parent.include_lookup,
                 )
             return self.__schema
         else:
@@ -196,6 +204,15 @@ class Relationship(BaseRelationship):
         if errors:
             raise ValidationError(errors)
 
+        id_value = data.get("id")
+
+        if self.__schema:
+            id_value = self.schema.fields["id"].deserialize(id_value)
+
+        existing = self.root.get_resource_from_lookup(self.type_, id_value)
+        if existing:
+            return existing
+
         # If ``attributes`` is set, we've folded included data into this
         # relationship. Unserialize it if we have a schema set; otherwise we
         # fall back below to old behaviour of only IDs.
@@ -204,11 +221,6 @@ class Relationship(BaseRelationship):
                 {"data": data, "included": self.root.included_data}
             )
             return result.data if _MARSHMALLOW_VERSION_INFO[0] < 3 else result
-
-        id_value = data.get("id")
-
-        if self.__schema:
-            id_value = self.schema.fields["id"].deserialize(id_value)
 
         return id_value
 
